@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TasteMatch · Linear Algebra</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="hero">
+  <div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
+  <div class="hero-inner">
+    <div class="eyebrow"><span class="eyebrow-dot"></span> TASTEMATCH · LINEAR ALGEBRA PROJECT</div>
+    <h1>TasteMatch</h1>
+    <h2>Taste Compatibility &amp; Blend Playlist</h2>
+    <p>Comparing musical taste as geometry.</p>
+    {% if stats %}<div class="stats"><span><b>{{ stats.songs }}</b> songs</span><span><b>{{ stats.genres }}</b> genres</span><span><b>{{ stats.duplicates }}</b> duplicate rows</span>{% if stats.imputed_numeric_values %}<span><b>{{ stats.imputed_numeric_values }}</b> values imputed</span>{% endif %}</div>{% endif %}
+  </div>
+</header>
+<main>
+  {% if startup_error %}
+  <section class="notice error"><b>Dataset could not be loaded.</b><br>{{ startup_error }}<br>Check that the supplied CSV is present and has the required columns.</section>
+  {% else %}
+  <section class="panel controls" id="select-taste">
+    <div class="section-title"><div><div class="eyebrow">01 / SELECT TASTE</div><h2>Build two song collections</h2></div><span class="step-badge">INPUT → SUBSPACE</span></div>
+    <div class="mode-switch" role="group" aria-label="Selection mode"><button class="mode active" data-mode="MANUAL">Manual selection</button><button class="mode" data-mode="AUTOMATIC">Automatic profiles</button></div>
+    <p id="mode-description" class="muted">Choose between 5 and {{ max_songs }} songs for each person. These exact selected songs become the input to the Linear Algebra model.</p>
+    <div id="manual-controls" class="users-grid">
+      {% for user in ['A','B'] %}
+      <article class="user-card user-{{ user|lower }}" data-user="{{ user|lower }}">
+        <div class="user-heading"><div><div class="eyebrow">USER {{ user }}</div><h3>Song preferences</h3></div><span class="count" id="count-{{ user|lower }}">0 / {{ max_songs }}</span></div>
+        <div class="filters"><input type="search" id="search-{{ user|lower }}" placeholder="Search track or artist" aria-label="Search track or artist for User {{ user }}"><select id="genre-{{ user|lower }}" aria-label="Filter User {{ user }} by genre"><option value="">All genres</option>{% for genre in genres %}<option>{{ genre }}</option>{% endfor %}</select></div>
+        <div class="selected-wrap"><b>Selected songs <span id="selected-count-{{ user|lower }}"></span></b><div class="selected-list" id="selected-{{ user|lower }}"><span class="muted">None selected</span></div></div>
+        <div class="song-list" id="list-{{ user|lower }}" aria-label="Song search results for User {{ user }}"></div>
+      </article>
+      {% endfor %}
+    </div>
+    <div id="automatic-preview" class="users-grid hidden">
+      <article class="user-card user-a"><div class="eyebrow">USER A · AUTOMATIC</div><h3>Energetic, danceable, positive</h3><p class="muted">Score = standardized energy + danceability + valence</p><div class="auto-songs" id="auto-a"></div></article>
+      <article class="user-card user-b"><div class="eyebrow">USER B · AUTOMATIC</div><h3>Acoustic, calmer profile</h3><p class="muted">Score = standardized acousticness − energy − danceability</p><div class="auto-songs" id="auto-b"></div></article>
+    </div>
+    <div id="selection-warning" class="notice warning hidden"></div>
+    <button id="analyze-button" class="primary">Analyze taste <span>→</span></button>
+  </section>
+
+  <section id="results" class="hidden">
+    <div id="api-error" class="notice error hidden"></div>
+    <div id="result-content" class="hidden">
+      <section class="result-hero">
+        <div class="result-heading"><div class="eyebrow">02 / GEOMETRIC RESULT</div><h2>Geometric subspace compatibility</h2><p id="compatibility-interpretation" class="muted"></p><div class="result-stats" id="result-stats" aria-label="Selection and model summary"></div></div>
+        <div class="compat"><strong id="compatibility">—</strong><span>mean singular value × 100</span></div>
+      </section>
+      <button id="back-to-songs" class="secondary back-button" type="button">← BACK TO SONGS</button>
+
+      <section class="panel angle-panel">
+        <div class="section-title"><div><div class="eyebrow">DIRECTION BY DIRECTION</div><h2>Principal angles</h2></div><span class="mean-angle">Mean angle <b id="mean-angle">—</b></span></div>
+        <div class="angle-row" id="angles"></div>
+        <p class="muted">For each direction, σᵢ = cos(θᵢ). Smaller angles indicate stronger alignment; larger angles indicate weaker alignment.</p>
+      </section>
+
+      <section class="panel baseline-panel">
+        <div class="eyebrow">ONE VECTOR VS TWO SUBSPACES</div><h2>Baseline vs geometric comparison</h2>
+        <div class="baseline-grid">
+          <article><span class="metric-kicker">AVERAGE-VECTOR COSINE BASELINE</span><strong id="baseline-cosine">—</strong><span id="baseline-percent" class="metric-sub">—</span><p>Compares only one mean vector per user. The remapped percent is for display, not a probability.</p></article>
+          <article class="baseline-core"><span class="metric-kicker">PRINCIPAL-ANGLE COMPATIBILITY</span><strong id="baseline-subspace">—</strong><span class="metric-sub">mean of three σᵢ × 100</span><p>Compares the full modeled direction sets, so it captures alignment that a single average vector cannot.</p></article>
+        </div>
+        <div id="baseline-chart" class="chart-wrap" role="img" aria-label="Average-vector cosine and principal-angle compatibility percentages"></div>
+        <p class="muted">Average-vector cosine compares one average taste vector per user. Principal-angle compatibility compares the geometry of the two modeled taste subspaces.</p>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="eyebrow">PATTERN DISCOVERY</div><h2>PCA explained variance</h2>
+        <p class="muted">Large eigenvalues correspond to directions that explain more variation in the selected music features.</p>
+        <div id="variance-chart" class="chart-wrap" role="img" aria-label="PCA explained variance for users A and B"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="eyebrow">DIRECTIONAL ALIGNMENT</div><h2>Principal-angle graph</h2>
+        <p class="muted">Smaller principal angles indicate stronger alignment between the corresponding taste directions.</p>
+        <div id="principal-angle-chart" class="chart-wrap" role="img" aria-label="Principal angles for three taste directions"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="eyebrow">COMMON COORDINATE SYSTEM · PC1 × PC2</div><h2>Selected Songs in Common PCA Space</h2>
+        <p class="muted">Visualization of the selected songs in the first two principal-component directions. It does not replace the 3D Gram–Schmidt subspace or principal-angle calculation.</p>
+        <div id="taste-pca-chart" class="chart-wrap scatter-wrap" role="img" aria-label="Selected songs in common PCA space"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="eyebrow">RECOMMENDATIONS IN THE SAME PCA MODEL</div><h2>Selected Songs and Blended Recommendations</h2>
+        <div id="recommendation-pca-chart" class="chart-wrap scatter-wrap" role="img" aria-label="Selected songs and blended recommendations in PCA space"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="eyebrow">COLLECTION PROFILE</div><h2>Musical feature comparison</h2>
+        <p class="muted">Display-normalized feature means show each collection’s average relative to the full dataset. This chart is for visual comparison only; the Linear Algebra calculations use globally standardized feature vectors.</p>
+        <div id="feature-chart" class="chart-wrap" role="img" aria-label="Standardized musical feature means for users A and B"></div>
+      </section>
+
+      <section class="panel playlist-panel" id="playlist-section">
+        <div class="section-title"><div><div class="eyebrow">03 / BLENDED RESULT</div><h2>Playlist for both</h2></div><span class="step-badge">10 DATASET TRACKS</span></div>
+        <p class="muted">Candidates are the highest scoring unselected songs from the supplied dataset.</p>
+        <div class="table-scroll"><table class="playlist-table"><thead><tr><th>#</th><th>Track</th><th>Artist</th><th>Genre</th><th>Blend</th><th>Fit A</th><th>Fit B</th><th>Shared</th><th>Projection error</th></tr></thead><tbody id="playlist"></tbody></table></div>
+      </section>
+
+      <section class="panel formula-panel">
+        <div class="eyebrow">MATHEMATICAL SUMMARY</div><h2>From features to a blend</h2>
+        <div class="formula-grid">
+          <div><b>Song vector</b><code>x = [danceability, energy, valence, acousticness, speechiness, instrumentalness, tempo]ᵀ ∈ ℝ⁷</code></div>
+          <div><b>Standardization</b><code>z = (x − μ) / σ</code></div>
+          <div><b>User matrices</b><code>A ∈ ℝ⁷ˣⁿᴬ &nbsp;&nbsp; B ∈ ℝ⁷ˣⁿᴮ</code></div>
+          <div><b>Rank-nullity</b><code>rank(A) + nullity(A) = nᴬ<br>rank(B) + nullity(B) = nᴮ</code></div>
+          <div><b>Projection &amp; least squares</b><code>P(x) = QQᵀx<br>min ||Qc − x||²</code></div>
+          <div><b>Covariance &amp; diagonalization</b><code>C = XᶜᵀXᶜ/(n−1)<br>C = VΛVᵀ</code></div>
+          <div><b>Principal angles</b><code>M = QᴬᵀQᴮ = UΣVᵀ<br>σᵢ = cos(θᵢ), θᵢ = arccos(σᵢ)</code></div>
+          <div><b>Compatibility &amp; blend</b><code>mean(σᵢ) × 100<br>0.4 fitᴬ + 0.4 fitᴮ + 0.2 shared</code></div>
+        </div>
+      </section>
+
+      <section class="panel support-panel">
+        <div class="eyebrow">VIVA QUICK LOOK</div><h2>Linear Algebra supporting analysis</h2>
+        <div class="users-grid support-grid">
+          <article class="support-user support-a"><div class="eyebrow">USER A</div><div id="support-a"></div></article>
+          <article class="support-user support-b"><div class="eyebrow">USER B</div><div id="support-b"></div></article>
+        </div>
+        <div class="orthogonality-row"><span>Q<sub>A</sub>ᵀQ<sub>A</sub> ≈ I <b id="orth-a">—</b></span><span>Q<sub>B</sub>ᵀQ<sub>B</sub> ≈ I <b id="orth-b">—</b></span></div>
+        <div class="shared-directions"><div class="eyebrow">SHARED TASTE DIRECTIONS</div><div id="shared-directions"></div></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="eyebrow">NUMERICAL SVD OUTPUT</div><h2>Principal-angle table</h2>
+        <div class="table-scroll"><table><thead><tr><th>Direction</th><th>Singular value σᵢ</th><th>Principal angle θᵢ</th><th>Overlap strength</th></tr></thead><tbody id="angle-table"></tbody></table></div>
+      </section>
+
+      <details class="panel math-details"><summary>Explore the complete math pipeline</summary><div id="pipeline"></div></details>
+    </div>
+  </section>
+
+  <section class="panel why"><div class="eyebrow">MODEL NOTES</div><h2>How to read this application</h2><div class="why-grid">
+    <div><b>Standardization</b><p>One StandardScaler is fitted to the entire dataset. It puts all seven musical features into a comparable coordinate system so geometry is not dominated by measurement units.</p></div>
+    <div><b>Full span vs taste model</b><p>Rank and nullity describe the full selected-song span. Three dimensions are a modeling approximation used for subspace comparison.</p></div>
+    <div><b>Gram–Schmidt vs PCA</b><p>The explicit Gram–Schmidt basis defines taste subspaces. PCA describes variation and supplies the common visualization coordinates; it does not replace Q<sub>A</sub> or Q<sub>B</sub>.</p></div>
+    <div><b>Baseline vs core method</b><p>Average-vector cosine is a simple reference point. Principal angles compare the geometry of both modeled subspaces and are the core compatibility method.</p></div>
+    <div><b>Playlist fit</b><p>Projection fits and shared-space fit are normalized geometric scores. Projection error is the residual distance to the shared subspace.</p></div>
+    <div><b>Interpretation</b><p>Compatibility is a geometric score, not a probability. Synthetic profiles and this small supplied dataset make the result an educational model.</p></div>
+  </div></section>
+  {% endif %}
+</main>
+<footer>LOCAL DATA · EXPLICIT LINEAR ALGEBRA · NO SPOTIFY ACCOUNT REQUIRED</footer>
+<script>
+window.PROJECT_DATA = {songs: {{ songs|tojson }}, genres: {{ genres|tojson }}, autoA: {{ auto_a|tojson }}, autoB: {{ auto_b|tojson }}, maxSongs: {{ max_songs }}};
+</script>
+<script src="{{ url_for('static', filename='app.js') }}?v=2"></script>
+</body>
+</html>
